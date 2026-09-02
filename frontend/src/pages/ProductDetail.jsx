@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import client, { apiErrorMessage } from "../api/client.js";
+import client, { API_ORIGIN, apiErrorMessage } from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import "./ProductDetail.css";
 
 const messageFor = apiErrorMessage;
-const imageUrl = (url) => url && (url.startsWith("http") ? url : `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`);
+const imageUrl = (url) => url && (url.startsWith("http") ? url : `${API_ORIGIN}${url.startsWith("/") ? "" : "/"}${url}`);
 
 function Stars({ value, onChange, label = "Rating" }) {
   return <div className="stars" aria-label={label}>{[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" className={star <= value ? "star selected" : "star"} onClick={() => onChange?.(star)} disabled={!onChange} aria-label={`${star} star${star === 1 ? "" : "s"}`}>★</button>)}</div>;

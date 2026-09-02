@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import client, { apiErrorMessage } from "../api/client.js";
+import client, { API_ORIGIN, apiErrorMessage } from "../api/client.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Link, useNavigate } from "react-router-dom";
 import "./Products.css";
@@ -77,7 +77,7 @@ export default function Products() {
       return image;
     }
 
-    return `http://localhost:8000${image.startsWith("/") ? "" : "/"}${image}`;
+    return `${API_ORIGIN}${image.startsWith("/") ? "" : "/"}${image}`;
   };
 
   return (

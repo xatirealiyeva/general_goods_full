@@ -32,10 +32,15 @@ echo "Applying database migrations..."
 python manage.py migrate --noinput
 
 echo "Collecting static files..."
-python manage.py collectstatic --noinput || true
+python manage.py collectstatic --noinput
 
-echo "Seeding demo data..."
-python manage.py seed_demo_data
+if [ "${RUN_SEED_DEMO_DATA:-false}" = "true" ]; then
+    echo "Seeding demo data..."
+    python manage.py seed_demo_data
+fi
 
 echo "Starting server..."
+if [ "$1" = "gunicorn" ]; then
+    exec gunicorn config.wsgi:application --bind "0.0.0.0:${PORT:-8000}" --workers "${GUNICORN_WORKERS:-3}"
+fi
 exec "$@"

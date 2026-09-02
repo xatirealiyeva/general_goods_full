@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,7 +13,7 @@ from apps.catalog.models import Product
 from apps.catalog.services import ProductService
 from apps.catalog.serializers import ProductListDTO
 from django.shortcuts import get_object_or_404
-from django.db.models import Sum, F, DecimalField, ExpressionWrapper, Count
+from django.db.models import Count
 from .services import CustomerService
 
 
@@ -156,27 +158,28 @@ class StoreDashboardView(APIView):
         from apps.orders.models import Order, OrderItem
 
         successful_statuses = [Order.Status.CONFIRMED, Order.Status.SHIPPED, Order.Status.DELIVERED]
-        items = OrderItem.objects.filter(seller=store.seller, order__status__in=successful_statuses).select_related("order", "variant__product")
-        revenue_expression = ExpressionWrapper(F("unit_price") * F("quantity"), output_field=DecimalField(max_digits=12, decimal_places=2))
-        aggregate = items.aggregate(total_items_sold=Sum("quantity"), total_revenue=Sum(revenue_expression))
+        items = list(OrderItem.objects.filter(seller=store.seller, order__status__in=successful_statuses).select_related("order", "variant__product").order_by("-order__created_at"))
+        sales_by_product = defaultdict(lambda: {"sold": 0, "revenue": 0})
+        for item in items:
+            sales_by_product[item.variant.product_id]["sold"] += item.quantity
+            sales_by_product[item.variant.product_id]["revenue"] += item.line_total
         product_sales = []
         for product in store.products.all().prefetch_related("variants"):
-            product_items = items.filter(variant__product=product)
-            totals = product_items.aggregate(sold=Sum("quantity"), revenue=Sum(revenue_expression))
+            totals = sales_by_product[product.id]
             product_sales.append({
                 "id": str(product.id), "name": product.name, "price": str(product.base_price), "status": product.status,
                 "stock_quantity": sum(variant.stock_quantity for variant in product.variants.all()),
-                "sold": totals["sold"] or 0, "revenue": str(totals["revenue"] or 0),
+                "sold": totals["sold"], "revenue": str(totals["revenue"]),
             })
         sales = [{
             "order_id": str(item.order_id), "order_number": item.order.order_number, "product": item.variant.product.name,
             "quantity": item.quantity, "unit_price": str(item.unit_price), "total": str(item.line_total),
             "status": item.order.status, "created_at": item.order.created_at,
-        } for item in items.order_by("-order__created_at")]
+        } for item in items]
         return Response({
             "store": StoreDTO(store).data,
             "products": product_sales,
-            "sales_summary": {"total_orders": items.values("order_id").distinct().count(), "total_items_sold": aggregate["total_items_sold"] or 0, "total_revenue": str(aggregate["total_revenue"] or 0)},
+            "sales_summary": {"total_orders": len({item.order_id for item in items}), "total_items_sold": sum(item.quantity for item in items), "total_revenue": str(sum((item.line_total for item in items), 0))},
             "sales": sales,
         })
 
