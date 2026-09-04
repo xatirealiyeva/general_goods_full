@@ -10,6 +10,7 @@ from apps.customers.models import Customer
 from apps.sellers.models import Seller
 from apps.catalog.models import Category, Product, ProductVariant, ProductSellerAssignment
 from apps.cart.services import CartService
+from .models import Order, RefundRequest
 from .services import OrderService
 
 class DiscountCodeValidationTests(TestCase):
@@ -93,3 +94,68 @@ class SelectedCartCheckoutTests(TestCase):
         self.assertEqual(quote["subtotal"], "50.00")
         self.assertEqual(quote["discount_amount"], "50.00")
         self.assertEqual(quote["total"], "0.00")
+
+
+class RefundRequestApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("refund-buyer@example.com", "password123", role=User.Role.CUSTOMER)
+        self.customer = Customer.objects.create(user=self.user, first_name="Refund", last_name="Buyer")
+        self.order = Order.objects.create(
+            customer=self.customer,
+            status=Order.Status.DELIVERED,
+            shipping_address="1 Main Street",
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_customer_can_request_refund_for_own_delivered_order_once(self):
+        payload = {"order": str(self.order.id), "reason": "The item arrived damaged."}
+
+        created = self.client.post("/api/orders/refund-requests/", payload, format="json")
+        duplicate = self.client.post("/api/orders/refund-requests/", payload, format="json")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["order"], str(self.order.id))
+        self.assertEqual(created.data["reason"], payload["reason"])
+        self.assertEqual(created.data["status"], RefundRequest.Status.PENDING)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(RefundRequest.objects.filter(order=self.order).count(), 1)
+
+        admin = User.objects.create_user("refund-admin@example.com", "password123", role=User.Role.ADMIN)
+        self.client.force_authenticate(admin)
+        admin_list = self.client.get("/api/orders/refund-requests/admin/")
+
+        self.assertEqual(admin_list.status_code, 200)
+        records = admin_list.data.get("results", admin_list.data) if isinstance(admin_list.data, dict) else admin_list.data
+        self.assertEqual(records[0]["id"], created.data["id"])
+
+    def test_customer_cannot_request_refund_for_another_customers_order(self):
+        other_user = User.objects.create_user("other-refund-buyer@example.com", "password123", role=User.Role.CUSTOMER)
+        other_customer = Customer.objects.create(user=other_user, first_name="Other", last_name="Buyer")
+        other_order = Order.objects.create(
+            customer=other_customer,
+            status=Order.Status.DELIVERED,
+            shipping_address="2 Main Street",
+        )
+
+        response = self.client.post(
+            "/api/orders/refund-requests/",
+            {"order": str(other_order.id), "reason": "Not my order."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(RefundRequest.objects.filter(order=other_order).exists())
+
+    def test_customer_cannot_request_refund_for_a_non_delivered_order(self):
+        self.order.status = Order.Status.CONFIRMED
+        self.order.save(update_fields=["status"])
+
+        response = self.client.post(
+            "/api/orders/refund-requests/",
+            {"order": str(self.order.id), "reason": "Not delivered yet."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(RefundRequest.objects.filter(order=self.order).exists())
